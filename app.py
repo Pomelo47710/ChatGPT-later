@@ -22,6 +22,10 @@ handler = WebhookHandler(os.getenv('CHANNEL_SECRET'))
 openai.api_key = os.getenv('OPENAI_API_KEY')
 openai.api_base = "https://free.v36.cm/v1"  
 
+@app.route("/")
+def home():
+    return "LINE Bot API is running!"
+
 
 def GPT_response(text):
     # 接收回應, 下行要確認
