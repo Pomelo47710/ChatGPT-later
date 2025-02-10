@@ -1,50 +1,52 @@
 from flask import Flask, request, abort
-
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import *
-
-#======python函數庫======
-import tempfile, os
-import datetime
+import os
 import openai
-import time
 import traceback
-#========================
 
 app = Flask(__name__)
-static_tmp_path = os.path.join(os.path.dirname(__file__), 'static', 'tmp')
-# Channel Access Token
-line_bot_api = LineBotApi(os.getenv('CHANNEL_ACCESS_TOKEN'))
-# Channel Secret
-handler = WebhookHandler(os.getenv('CHANNEL_SECRET'))
-# OPENAI API Key
-openai.api_key = os.getenv('OPENAI_API_KEY')
-openai.api_base = "https://free.v36.cm/v1"  
 
-@app.route("/")
-def home():
-    return "LINE Bot API is running!"
+# 環境變數
+CHANNEL_ACCESS_TOKEN = os.getenv('CHANNEL_ACCESS_TOKEN')
+CHANNEL_SECRET = os.getenv('CHANNEL_SECRET')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+# 確保環境變數有值
+if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET or not OPENAI_API_KEY:
+    raise ValueError("環境變數未設置，請確認 Vercel 的 `Environment Variables` 是否正確！")
+
+# 設定 Line Bot API
+line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(CHANNEL_SECRET)
+
+# 設定 OpenAI API
+openai.api_key = OPENAI_API_KEY
+openai.api_base = "https://free.v36.cm/v1"
 
 
+# GPT 回應函數
 def GPT_response(text):
-    # 接收回應, 下行要確認
-    response = openai.Completion.create(model="gpt-4-mini", prompt=text, temperature=0.5, max_tokens=500)
-    print(response)
-    # 重組回應
-    answer = response['choices'][0]['text'].replace('。','')
-    return answer
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4-mini",
+            messages=[{"role": "user", "content": text}],
+            temperature=0.5,
+            max_tokens=500
+        )
+        return response["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(traceback.format_exc())
+        return " AI 服務異常，請稍後再試！"
 
 
-# 監聽所有來自 /callback 的 Post Request
+# Webhook 監聽
 @app.route("/callback", methods=['POST'])
 def callback():
-    # get X-Line-Signature header value
     signature = request.headers['X-Line-Signature']
-    # get request body as text
     body = request.get_data(as_text=True)
-    app.logger.info("Request body: " + body)
-    # handle webhook body
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
@@ -52,35 +54,19 @@ def callback():
     return 'OK'
 
 
-# 處理訊息
+# 處理使用者訊息
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg = event.message.text
     try:
-        GPT_answer = GPT_response(msg)
-        print(GPT_answer)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
+        reply_text = GPT_response(msg)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(reply_text))
     except:
         print(traceback.format_exc())
-        line_bot_api.reply_message(event.reply_token, TextSendMessage('OpenAI額度問題，請確認Log訊息。'))
-        
-
-@handler.add(PostbackEvent)
-def handle_message(event):
-    print(event.postback.data)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage("發生錯誤，請稍後再試！"))
 
 
-@handler.add(MemberJoinedEvent)
-def welcome(event):
-    uid = event.joined.members[0].user_id
-    gid = event.source.group_id
-    profile = line_bot_api.get_group_member_profile(gid, uid)
-    name = profile.display_name
-    message = TextSendMessage(text=f'{name}歡迎加入')
-    line_bot_api.reply_message(event.reply_token, message)
-        
-        
-import os
-if __name__ == "__main__":
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+# Vercel Serverless 處理函數
+def handler(event, context):
+    return app(event, context)
+
